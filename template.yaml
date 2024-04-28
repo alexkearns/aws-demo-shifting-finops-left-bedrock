@@ -1,0 +1,92 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: API to handle GitHub webhook events
+
+Parameters:
+  Stage:
+    Type: String
+    Default: Dev
+    AllowedValues: [Dev, Stage, Prod]
+
+Mappings:
+  SecretsManagerExtensionMap:
+    us-east-1:
+      Arn: arn:aws:lambda:us-east-1:177933569100:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:11
+
+Resources:
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Stage
+
+  GithubApiToken:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${AWS::StackName}-github-api-token"
+
+  GithubWebhookSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${AWS::StackName}-github-webhook-secret"
+      GenerateSecretString:
+        PasswordLength: 32
+
+  Queue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-queue"
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount: 1
+
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-dead-letter-queue"
+
+  # Couldn't use a custom authorizer for this, as API GW doesn't pass the body
+  # of the request to the Lambda function. GitHub signatures require this to be
+  # calculated and compared.
+  AuthAndQueueFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./auth_and_queue
+      Handler: app.lambda_handler
+      Runtime: python3.11
+      Timeout: 10
+      MemorySize: 256
+      Architectures:
+        - arm64
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /handle-event
+            Method: POST
+            RestApiId: !Ref Api
+      Layers:
+        - !FindInMap [SecretsManagerExtensionMap, !Ref AWS::Region, Arn]
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt Queue.QueueName
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref GithubWebhookSecret
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref GithubApiToken
+      Environment:
+        Variables:
+          GITHUB_WEBHOOK_SECRET_ARN: !Ref GithubWebhookSecret
+          QUEUE_URL: !Ref Queue
+
+  EventHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./event_handler_function
+      Handler: app.lambda_handler
+      Runtime: python3.11
+      Architectures:
+        - arm64
+
+Outputs:
+  ServerlessApiUrl:
+    Value: !Sub https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${Stage}/
