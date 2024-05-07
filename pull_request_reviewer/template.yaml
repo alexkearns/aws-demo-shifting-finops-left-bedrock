@@ -7,6 +7,9 @@ Parameters:
     Type: String
     Default: Dev
     AllowedValues: [Dev, Stage, Prod]
+  BedrockFoundationModelArn:
+    Type: String
+    Default: arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0
 
 Mappings:
   SecretsManagerExtensionMap:
@@ -71,8 +74,6 @@ Resources:
             QueueName: !GetAtt Queue.QueueName
         - AWSSecretsManagerGetSecretValuePolicy:
             SecretArn: !Ref GithubWebhookSecret
-        - AWSSecretsManagerGetSecretValuePolicy:
-            SecretArn: !Ref GithubApiToken
       Environment:
         Variables:
           GITHUB_WEBHOOK_SECRET_ARN: !Ref GithubWebhookSecret
@@ -84,6 +85,22 @@ Resources:
       CodeUri: ./event_handler_function
       Handler: app.lambda_handler
       Runtime: python3.11
+      Timeout: 60
+      Layers:
+        - !FindInMap [ SecretsManagerExtensionMap, !Ref AWS::Region, Arn ]
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: !Ref BedrockFoundationModelArn
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref GithubApiToken
+      Environment:
+        Variables:
+          GITHUB_API_TOKEN_SECRET_ARN: !Ref GithubApiToken
+          BEDROCK_FM_ARN: !Ref BedrockFoundationModelArn
       Architectures:
         - arm64
 
