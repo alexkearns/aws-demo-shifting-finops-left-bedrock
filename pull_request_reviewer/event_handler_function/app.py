@@ -65,14 +65,32 @@ def handle_event(event):
         "Authorization": f"Bearer {github_api_token}",
         "X-GitHub-Api-Version": "2022-11-28"
     }
-    req = requests.get(url, headers=headers)
-    res = req.text
+    diff_req = requests.get(url, headers=headers)
+    diff_res = diff_req.text
+
+    headers = {
+        "Accept": "application/vnd.github.raw+json",
+        "Authorization": f"Bearer {github_api_token}",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+    desc_req = requests.get(url, headers=headers)
+    desc_res = json.loads(desc_req.text)["body"]
+
+    instructions = (
+        "Using the combination of the pull request description, the Git diff, and the contents of "
+        "the repository, make a judgement as to whether the proposed change makes financial sense. "
+        "Explain your decision making."
+    )
 
     # Initialise prompt
-    prompt = f"""Explain the pull request.
+    prompt = f"""{instructions}
+
+<pull-request-description>
+{desc_res}
+</pull-request-description>
 
 <pull-request-diff>
-{res}
+{diff_res}
 </pull-request-diff>
 
 <repository-contents-at-HEAD>"""
