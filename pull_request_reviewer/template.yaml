@@ -38,6 +38,7 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub "${AWS::StackName}-queue"
+      VisibilityTimeout: 120
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
         maxReceiveCount: 1
@@ -88,6 +89,7 @@ Resources:
       Timeout: 60
       Layers:
         - !FindInMap [ SecretsManagerExtensionMap, !Ref AWS::Region, Arn ]
+        - !Sub "arn:aws:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPythonV2:69"
       Policies:
         - Version: '2012-10-17'
           Statement:
@@ -101,6 +103,12 @@ Resources:
         Variables:
           GITHUB_API_TOKEN_SECRET_ARN: !Ref GithubApiToken
           BEDROCK_FM_ARN: !Ref BedrockFoundationModelArn
+      Events:
+        Queue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt Queue.Arn
+            BatchSize: 1
       Architectures:
         - arm64
 

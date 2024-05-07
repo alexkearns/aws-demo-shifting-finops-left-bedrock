@@ -3,6 +3,7 @@ import boto3
 import os
 import json
 import requests
+from aws_lambda_powertools.utilities.data_classes import event_source, SQSEvent
 
 GITHUB_API_TOKEN_SECRET_ARN = os.environ["GITHUB_API_TOKEN_SECRET_ARN"]
 BEDROCK_FM_ARN = os.environ["BEDROCK_FM_ARN"]
@@ -30,7 +31,9 @@ def get_github_webhook_secret(secret_id):
     return secret
 
 
-def lambda_handler(event, context):
+def handle_event(event):
+    event = json.loads(event)
+
     github_api_token = get_github_webhook_secret(GITHUB_API_TOKEN_SECRET_ARN)
 
     headers = {
@@ -120,9 +123,11 @@ def lambda_handler(event, context):
 
     req = requests.post(url, data=pr_comment_data, headers=headers)
 
-    if req.status_code == requests.codes.created:
-        return {
-            "status": "Success"
-        }
-    else:
+    if req.status_code != requests.codes.created:
         req.raise_for_status()
+
+
+@event_source(data_class=SQSEvent)
+def lambda_handler(event: SQSEvent, context):
+    for record in event.records:
+        handle_event(record.body)
