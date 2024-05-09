@@ -14,6 +14,9 @@ Parameters:
   BedrockFoundationModelArn:
     Type: String
     Default: arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0
+  BedrockFoundationModelName:
+    Type: String
+    Default: anthropic.claude-3-sonnet-20240229-v1:0
 
 Mappings:
   SecretsManagerExtensionMap:
@@ -115,6 +118,55 @@ Resources:
             BatchSize: 1
       Architectures:
         - arm64
+
+  AgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AmazonBedrockExecutionRoleForAgents-finops-demo
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                AWS:SourceArn: !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*
+      Policies:
+        - PolicyName: BedrockInvoke
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !Ref BedrockFoundationModelArn
+        - PolicyName: KnowledgeBaseAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:Retrieve
+                  - bedrock:RetrieveAndGenerate
+                Resource:
+                  - !GetAtt KnowledgeBasePinecone.KnowledgeBaseArn
+
+  BedrockAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: !Sub ${AWS::StackName}-agent
+      AgentResourceRoleArn: !GetAtt AgentRole.Arn
+      FoundationModel: !Ref BedrockFoundationModelName
+      Instruction: You are an assistant that helps guide developers on whether their proposed changes to AWS are cost-effective.
+      IdleSessionTTLInSeconds: 60
+      KnowledgeBases:
+        - KnowledgeBaseId: !Ref KnowledgeBasePinecone
+          Description: Knowledge base linked to Pinecone
+          KnowledgeBaseState: ENABLED
 
   KnowledgeBaseBucket:
     Type: AWS::S3::Bucket
