@@ -3,6 +3,10 @@ Transform: AWS::Serverless-2016-10-31
 Description: API to handle GitHub webhook events
 
 Parameters:
+  PineconeSecretArn:
+    Type: String
+  PineconeConnectionString:
+    Type: String
   Stage:
     Type: String
     Default: Dev
@@ -111,6 +115,91 @@ Resources:
             BatchSize: 1
       Architectures:
         - arm64
+
+  KnowledgeBaseBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  KnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                AWS:SourceArn: !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*
+      Policies:
+        - PolicyName: BedrockInvoke
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v1
+        - PolicyName: SecretAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref PineconeSecretArn
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                Resource:
+                  - !GetAtt KnowledgeBaseBucket.Arn
+                  - !Sub "${KnowledgeBaseBucket.Arn}/*"
+
+  KnowledgeBasePinecone:
+    Type: AWS::Bedrock::KnowledgeBase
+    Properties:
+      Name: !Sub "${AWS::StackName}-kb-pinecone"
+      Description: "Knowledge base for Pinecone"
+      RoleArn: !GetAtt KnowledgeBaseRole.Arn
+      KnowledgeBaseConfiguration:
+        Type: "VECTOR"
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v1"
+      StorageConfiguration:
+        Type: "PINECONE"
+        PineconeConfiguration:
+          ConnectionString: !Ref PineconeConnectionString
+          CredentialsSecretArn: !Ref PineconeSecretArn
+          Namespace: !Ref AWS::StackName
+          FieldMapping:
+            TextField: "text"
+            MetadataField: "metadata"
+
+  KnoweldgeBaseDataSource:
+    Type: AWS::Bedrock::DataSource
+    Properties:
+      KnowledgeBaseId: !Ref KnowledgeBasePinecone
+      Name: !Sub "${AWS::StackName}-data-source"
+      Description: "Data source for Pinecone"
+      DataSourceConfiguration:
+        Type: "S3"
+        S3Configuration:
+          BucketArn: !GetAtt KnowledgeBaseBucket.Arn
 
 Outputs:
   ServerlessApiUrl:
