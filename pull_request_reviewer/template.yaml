@@ -1,4 +1,4 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: API to handle GitHub webhook events
 
@@ -95,11 +95,20 @@ Resources:
       Runtime: python3.11
       Timeout: 60
       Layers:
-        - !FindInMap [ SecretsManagerExtensionMap, !Ref AWS::Region, Arn ]
+        - !FindInMap [SecretsManagerExtensionMap, !Ref AWS::Region, Arn]
         - !Sub "arn:aws:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPythonV2:69"
       Policies:
-        - Version: '2012-10-17'
+        - Version: "2012-10-17"
           Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeAgent
+              Resource: !GetAtt BedrockAgentAlias.AgentAliasArn
+            - Effect: Allow
+              Action:
+                - bedrock:Retrieve
+                - bedrock:RetrieveAndGenerate
+              Resource: !GetAtt KnowledgeBasePinecone.KnowledgeBaseArn
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -110,6 +119,8 @@ Resources:
         Variables:
           GITHUB_API_TOKEN_SECRET_ARN: !Ref GithubApiToken
           BEDROCK_FM_ARN: !Ref BedrockFoundationModelArn
+          BEDROCK_AGENT_ALIAS_ID: !GetAtt BedrockAgentAlias.AgentAliasId
+          BEDROCK_AGENT_ID: !GetAtt BedrockAgent.AgentId
       Events:
         Queue:
           Type: SQS
@@ -124,7 +135,7 @@ Resources:
     Properties:
       RoleName: AmazonBedrockExecutionRoleForAgents-finops-demo
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
@@ -155,13 +166,25 @@ Resources:
                 Resource:
                   - !GetAtt KnowledgeBasePinecone.KnowledgeBaseArn
 
+  BedrockAgentAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentAliasName: !Sub ${AWS::StackName}-agent-alias
+      AgentId: !Ref BedrockAgent
+
   BedrockAgent:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: !Sub ${AWS::StackName}-agent
       AgentResourceRoleArn: !GetAtt AgentRole.Arn
       FoundationModel: !Ref BedrockFoundationModelName
-      Instruction: You are an assistant that helps guide developers on whether their proposed changes to AWS are cost-effective.
+      Instruction: >
+        You are an automated assistant that serves to provide developers with 
+        useful guidance around whether their proposed change to AWS infrastructure 
+        is cost effective. You are provided with a proposed change in a 
+        structured format and you must make a judgement on whether it is in 
+        accordance with cost optimisation best practices. You may also provide 
+        recommendations on how to improve the proposed change.
       IdleSessionTTLInSeconds: 60
       KnowledgeBases:
         - KnowledgeBaseId: !Ref KnowledgeBasePinecone
@@ -181,7 +204,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:

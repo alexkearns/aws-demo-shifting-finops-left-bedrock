@@ -1,3 +1,5 @@
 .aws-sam
 .idea
+.vscode
 samconfig.toml
+scratch.txt
