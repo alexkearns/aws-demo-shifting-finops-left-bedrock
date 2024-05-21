@@ -86,6 +86,7 @@ def handle_event(event, message_id):
                 {
                     "summary": "A security group rule is changed to allow port 33060 instead of port 3306.",
                     "resource": "MySecurityGroup",
+                    "cloudFormationStackName": "MyStack",
                     "justification": "The database is now running on port 33060.",
                 }
             ]
@@ -98,7 +99,7 @@ Carry out the following instructions step by step, outputting it to <thinking> t
 
 1. Determine the the AWS resources that would be changed be as a result of the diff. Use the key in the template's `Resources` object that defines the resource as the resource name.
 
-2. Summarise the changes being made to each resource according to the Git diff. Focus on the resource changes, rather than template changes. Each change being made to a resource should be output as an object in the `changes` list in the answer. In the summary you must include details of the before and after state of the change. Add context to this by including the name of the resource that is changing. The summary of the change should be in the `summary` key of the JSON object, the name of the resource should be in the `resource` key.
+2. Summarise the changes being made to each resource according to the Git diff. Focus on the resource changes, rather than template changes. Each change being made to a resource should be output as an object in the `changes` list in the answer. In the summary you must include details of the before and after state of the change. Add context to this by including the name of the resource that is changing. The summary of the change should be in the `summary` key of the JSON object, the name of the resource should be in the `resource` key. The CloudFormation stack name should also be included in the `cloudFormationStackName` key.
 
 3. For each resource being changed, add information about the justification for the change.
 
@@ -151,21 +152,18 @@ Here is an example of the format of the output.
         raise Exception("No answer found in response from foundation model.")
     fm_answer = match.group(1)
 
-    # Build up the prompt for the knowledge base
-    kb_prompt = f"""Make a judgement as to whether the proposed changes are likely to be cost effective. Think about it carefully. Consider whether the resource specification is currently sufficient. Judge whether the change would be cost-efficient. Additionally, consider alternative, more cost efficient ways to achieve what is being proposed. 
+    agent_prompt = f"""Assess the proposed changes in line with your instructions. Consider the developer's justification for the change in addition to other sources of information. If you interpret percentages when reviewing CloudWatch Metrics, you MUST interpret them literally. For example a value of 0.5 is 0.5 percent and not 50 percent.
 
-When recommending alternatives, be aware that Auto Scaling refers to adding more instances rather than automatically changing the size of instance. 
-
-<changes>
-{fm_answer}
-</changes>
-"""
+    <summary_of_changes>
+    {fm_answer}
+    </summary_of_changes>
+    """
 
     # Invoke the knowledge base
     agent_response = bedrock_agents.invoke_agent(
         agentId=BEDROCK_AGENT_ID,
         agentAliasId=BEDROCK_AGENT_ALIAS_ID,
-        inputText=kb_prompt,
+        inputText=agent_prompt,
         sessionId=message_id,
     )
     completion = ""

@@ -147,6 +147,14 @@ Resources:
               ArnLike:
                 AWS:SourceArn: !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*
       Policies:
+        - PolicyName: LambdaInvoke
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt BedrockAgentCloudWatchUtilisationMetricsFunction.Arn
         - PolicyName: BedrockInvoke
           PolicyDocument:
             Version: "2012-10-17"
@@ -179,17 +187,73 @@ Resources:
       AgentResourceRoleArn: !GetAtt AgentRole.Arn
       FoundationModel: !Ref BedrockFoundationModelName
       Instruction: >
-        You are an automated assistant that serves to provide developers with 
-        useful guidance around whether their proposed change to AWS infrastructure 
-        is cost effective. You are provided with a proposed change in a 
-        structured format and you must make a judgement on whether it is in 
-        accordance with cost optimisation best practices. You may also provide 
-        recommendations on how to improve the proposed change.
+        You are an automated assistant that responds to proposed changes to AWS 
+        infrastructure in the form of pull-request comments. Your role is to 
+        assess the change through the lens of cost optimization and provide 
+        judgement as to whether it is appropriate. You should use quantitative 
+        data in your decision making where possible, for example CloudWatch Metrics.
       IdleSessionTTLInSeconds: 60
       KnowledgeBases:
         - KnowledgeBaseId: !Ref KnowledgeBasePinecone
           Description: Knowledge base linked to Pinecone
           KnowledgeBaseState: ENABLED
+      ActionGroups:
+        - ActionGroupName: "GetCloudWatchUtilisationMetrics"
+          Description: >
+            Get the CloudWatch metrics for utilisation of a particular resource,
+            given its CloudFormation stack name and logical resource ID.
+          ActionGroupExecutor:
+            Lambda: !GetAtt BedrockAgentCloudWatchUtilisationMetricsFunction.Arn
+          ApiSchema:
+            Payload: |
+              openapi: 3.0.0
+              info:
+                title: CloudWatch utilisation metrics API
+                version: 1.0.0
+              paths:
+                "/cloudwatch-metrics-by-cfn-resource":
+                  get:
+                    summary: GET /cloudwatch-metrics-by-cfn-resource
+                    description: >
+                      Gets CloudWatch metrics for utilisation of a particular
+                      resource, given its CloudFormation stack name and logical
+                      resource ID.
+                    operationId: getCloudWatchUtilisationMetrics
+                    parameters:
+                      - name: stack_id
+                        in: query
+                        description: CloudFormation stack ID
+                        required: true
+                        schema:
+                          type: string
+                      - name: resource_id
+                        in: query
+                        description: Logical resource ID
+                        required: true
+                        schema:
+                          type: string
+                    responses:
+                      "200":
+                        description: CloudWatch utilisation metrics for resource
+                        content:
+                          application/json:
+                            schema:
+                              type: object
+                              properties:
+                                metrics:
+                                  type: object
+                                  additionalProperties:
+                                    type: array
+                                    items:
+                                      type: object
+                                      properties:
+                                        timestamp:
+                                          type: string
+                                          format: date-time
+                                        value:
+                                          type: number
+                                        unit:
+                                          type: string
 
   KnowledgeBaseBucket:
     Type: AWS::S3::Bucket
@@ -275,6 +339,36 @@ Resources:
         Type: "S3"
         S3Configuration:
           BucketArn: !GetAtt KnowledgeBaseBucket.Arn
+
+  BedrockAgentCloudWatchUtilisationMetricsFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt BedrockAgentCloudWatchUtilisationMetricsFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: bedrock.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+
+  BedrockAgentCloudWatchUtilisationMetricsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./agent_cloudwatch_utilisation_metrics
+      Handler: app.lambda_handler
+      Runtime: python3.11
+      Timeout: 15
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - cloudwatch:GetMetricStatistics
+              Resource:
+                - "*"
+            - Effect: Allow
+              Action:
+                - cloudformation:DescribeStackResource
+              Resource: !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/*/*"
+      Layers:
+        - !Sub "arn:aws:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPythonV2:69"
 
 Outputs:
   ServerlessApiUrl:
